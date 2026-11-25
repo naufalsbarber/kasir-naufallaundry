@@ -3802,6 +3802,151 @@ Object.assign(app, {
   }
 });
 /* ============================================================
+   MESIN SLIDE PRESENTASI (16:9, 1600x900) — dipakai Laundry & Aqua
+   cfg = { DK, toko, alamat, logo, judul, ymLabel, kpis:[{lab,val,sub,dark}], charts:[...] }
+   chart: {title, note, kind:'bars'|'hbars'|'split', ...}
+   ============================================================ */
+const DECK_W = 1600, DECK_H = 900;
+const dFont = (w, sz, f = 'Inter') => `${w} ${sz}px "${f}","Segoe UI",Arial,sans-serif`;
+const dShort = v => { v = Math.round(v); const a = Math.abs(v); if (a >= 1e6) return (v / 1e6).toFixed(a >= 1e7 ? 0 : 1).replace('.', ',') + ' jt'; if (a >= 1e3) return Math.round(v / 1e3) + ' rb'; return String(v); };
+function dTrunc(x, t, maxW) { t = String(t); if (x.measureText(t).width <= maxW) return t; while (t.length > 1 && x.measureText(t + '…').width > maxW) t = t.slice(0, -1); return t + '…'; }
+
+function dBars(x, DK, X, Y, w, h, data, { fmt = v => String(Math.round(v * 10) / 10), c1 = DK.accent2, c2 = DK.accent } = {}) {
+  const n = data.length, max = Math.max(...data, 1), gw = w / n, bw = Math.max(8, Math.min(34, gw * .58)), base = Y + h;
+  x.fillStyle = DK.line; x.fillRect(X, base, w, 2);
+  [.5, 1].forEach(f => { x.fillStyle = 'rgba(0,0,0,.06)'; x.fillRect(X, base - (h - 40) * f, w, 1); });
+  data.forEach((v, i) => {
+    const bh = v > 0 ? Math.max(8, Math.round(v / max * (h - 40))) : 0, cx = X + i * gw + gw / 2;
+    if (bh) { const g = x.createLinearGradient(0, base - bh, 0, base); g.addColorStop(0, c1); g.addColorStop(1, c2); x.fillStyle = g; x.fillRect(cx - bw / 2, base - bh, bw, bh); }
+    if (v > 0 && gw >= 30) { x.font = dFont(600, 19); x.fillStyle = DK.muted; x.textAlign = 'center'; x.fillText(fmt(v), cx, base - bh - 10); }
+    x.font = dFont(500, 19); x.fillStyle = DK.muted; x.textAlign = 'center'; x.fillText(String(i + 1), cx, base + 30);
+  });
+}
+function dHBars(x, DK, X, Y, w, h, items, { fmt = v => String(v), c1 = DK.accent2, c2 = DK.accent, labW = 380 } = {}) {
+  if (!items.length || !items.some(i => i[1] > 0)) { x.font = dFont(500, 28); x.fillStyle = DK.muted; x.textAlign = 'left'; x.fillText('Belum ada data di bulan ini', X, Y + 50); return; }
+  items = items.slice(0, 10); const max = Math.max(...items.map(i => i[1]), 1), rh = Math.min(66, h / items.length), bh = Math.min(38, rh * .6), valW = 190;
+  items.forEach(([lab, v], i) => {
+    const y = Y + i * rh + rh / 2;
+    x.font = dFont(600, 26); x.fillStyle = DK.ink; x.textAlign = 'left'; x.fillText(dTrunc(x, lab, labW - 20), X, y + 9);
+    const bw = Math.max(6, (w - labW - valW) * v / max), g = x.createLinearGradient(X + labW, 0, X + labW + bw, 0); g.addColorStop(0, c1); g.addColorStop(1, c2);
+    x.fillStyle = g; x.fillRect(X + labW, y - bh / 2, bw, bh);
+    x.font = dFont(700, 26); x.fillStyle = DK.ink; x.fillText(fmt(v), X + labW + bw + 14, y + 9);
+  });
+}
+function dCard(x, DK, X, Y, w, h, lab, val, sub, dark, vsz = 54) {
+  if (dark) { const g = x.createLinearGradient(X, Y, X + w, Y + h); g.addColorStop(0, DK.dark); g.addColorStop(1, DK.dark2); x.fillStyle = g; }
+  else x.fillStyle = DK.paper;
+  x.beginPath(); x.roundRect ? x.roundRect(X, Y, w, h, 20) : x.rect(X, Y, w, h); x.fill();
+  if (!dark) { x.strokeStyle = DK.line; x.lineWidth = 2; x.stroke(); }
+  x.textAlign = 'left'; x.font = dFont(700, 21, 'Space Grotesk'); x.fillStyle = dark ? DK.accent2 : DK.muted; x.fillText(lab.toUpperCase(), X + 30, Y + 48);
+  x.font = dFont(800, vsz); x.fillStyle = dark ? '#fff' : DK.ink; x.fillText(dTrunc(x, val, w - 60), X + 30, Y + h - 62);
+  if (sub) { x.font = dFont(600, 21); x.fillStyle = dark ? DK.accent2 : (/^▲/.test(sub) ? DK.ok : /^▼/.test(sub) ? DK.bad : DK.muted); x.fillText(dTrunc(x, sub, w - 60), X + 30, Y + h - 22); }
+}
+const dPct = (a, b) => b ? (a >= b ? '▲ ' : '▼ ') + Math.abs(Math.round((a - b) / b * 100)) + '% vs bulan lalu' : 'bulan lalu belum ada data';
+
+async function buildDeckSlides(cfg) {
+  try { await document.fonts.ready; } catch (e) { }
+  const { DK, logo } = cfg, W = DECK_W, H = DECK_H, slides = [];
+  const lw = (h) => logo ? h * logo.width / logo.height : 0;
+  const mk = (title, fn, note) => {
+    const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d');
+    x.fillStyle = DK.bg; x.fillRect(0, 0, W, H);
+    if (title) {
+      const g = x.createLinearGradient(0, 0, W, 130); g.addColorStop(0, DK.dark); g.addColorStop(1, DK.dark2); x.fillStyle = g; x.fillRect(0, 0, W, 138); x.fillStyle = DK.accent; x.fillRect(0, 138, W, 6);
+      if (logo) { const lh = 100, lww = lw(lh); x.fillStyle = '#fff'; x.beginPath(); x.roundRect ? x.roundRect(44, 20, lww + 24, lh + 4, 16) : x.rect(44, 20, lww + 24, lh + 4); x.fill(); x.drawImage(logo, 56, 22, lww, lh); }
+      const tx = 56 + lw(100) + 56;
+      x.textAlign = 'left'; x.fillStyle = DK.accent2; x.font = dFont(700, 22, 'Space Grotesk'); x.fillText((cfg.toko + ' · ' + cfg.ymLabel).toUpperCase(), tx, 62);
+      x.fillStyle = '#fff'; x.font = dFont(800, 46); x.fillText(title, tx, 116);
+    }
+    if (note) { x.fillStyle = DK.muted; x.font = dFont(600, 22); x.textAlign = 'left'; x.fillText(note, 56, H - 30); }
+    fn(x); slides.push(c);
+  };
+  // 1. cover
+  mk(null, x => {
+    const g = x.createLinearGradient(0, 0, W, H); g.addColorStop(0, DK.dark); g.addColorStop(1, DK.dark2); x.fillStyle = g; x.fillRect(0, 0, W, H);
+    if (logo) { const lh = 330, lww = lw(lh); x.fillStyle = '#fff'; x.beginPath(); x.roundRect ? x.roundRect((W - lww) / 2 - 36, 90, lww + 72, lh + 40, 36) : x.rect((W - lww) / 2 - 36, 90, lww + 72, lh + 40); x.fill(); x.drawImage(logo, (W - lww) / 2, 110, lww, lh); }
+    x.textAlign = 'center'; x.fillStyle = DK.accent2; x.font = dFont(700, 34, 'Space Grotesk'); x.fillText('LAPORAN BULANAN', W / 2, 590);
+    x.fillStyle = '#fff'; x.font = dFont(800, 84); x.fillText(cfg.ymLabel, W / 2, 685);
+    x.fillStyle = DK.accent; x.fillRect(W / 2 - 90, 720, 180, 6);
+    x.fillStyle = 'rgba(255,255,255,.65)'; x.font = dFont(500, 26); x.fillText(cfg.alamat || '', W / 2, 780);
+  });
+  // 2. ringkasan 3x3
+  mk('Ringkasan', x => {
+    const w = (W - 112 - 48) / 3, h = 200, ys = [190, 190 + 232, 190 + 464];
+    cfg.kpis.slice(0, 9).forEach((k, i) => dCard(x, DK, 56 + (i % 3) * (w + 24), ys[Math.floor(i / 3)], w, h, k.lab, k.val, k.sub, k.dark, 56));
+  });
+  // 3. grafik
+  for (const c of cfg.charts) {
+    mk(c.title, x => {
+      const X = 56, Y = 190, w = W - 112;
+      if (c.kind === 'bars') dBars(x, DK, X + 10, Y + 20, w - 20, 560, c.data, c.opt || {});
+      else if (c.kind === 'hbars') dHBars(x, DK, X, Y + 10, w, 600, c.items, c.opt || {});
+      else if (c.kind === 'split') c.panels.forEach((p, i) => {
+        const pw = (w - 60) / 2, px = X + i * (pw + 60);
+        x.textAlign = 'left'; x.fillStyle = DK.goldDeep; x.font = dFont(700, 24, 'Space Grotesk'); x.fillText(p.title.toUpperCase(), px, Y + 20); x.fillStyle = DK.accent2; x.fillRect(px, Y + 34, pw, 4);
+        dHBars(x, DK, px, Y + 70, pw, 500, p.items, Object.assign({ labW: 250 }, p.opt || {}));
+      });
+    }, c.note);
+  }
+  // penutup
+  mk(null, x => {
+    const g = x.createLinearGradient(0, 0, W, H); g.addColorStop(0, DK.dark); g.addColorStop(1, DK.dark2); x.fillStyle = g; x.fillRect(0, 0, W, H);
+    if (logo) { const lh = 250, lww = lw(lh); x.fillStyle = '#fff'; x.beginPath(); x.roundRect ? x.roundRect((W - lww) / 2 - 30, 150, lww + 60, lh + 36, 30) : x.rect((W - lww) / 2 - 30, 150, lww + 60, lh + 36); x.fill(); x.drawImage(logo, (W - lww) / 2, 168, lww, lh); }
+    x.textAlign = 'center'; x.fillStyle = '#fff'; x.font = dFont(800, 80); x.fillText('Terima kasih', W / 2, 560);
+    x.fillStyle = DK.accent2; x.font = dFont(700, 30, 'Space Grotesk'); x.fillText(cfg.toko.toUpperCase() + ' · ' + cfg.ymLabel.toUpperCase(), W / 2, 625);
+    x.fillStyle = 'rgba(255,255,255,.6)'; x.font = dFont(500, 24); x.fillText(cfg.alamat || '', W / 2, 680);
+  });
+  return slides;
+}
+/* Presentasi bulanan (slide 16:9) gaya Barber — Laundry */
+Object.assign(app, {
+  async exportLaporanPresentasiPDF() {
+    const ym = state._laporanBulan; if (!/^\d{4}-\d{2}$/.test(ym || '')) return toast('Pilih bulan dulu');
+    toast('Menyusun presentasi…', 2500);
+    const [y, m] = ym.split('-').map(Number), pd = new Date(y, m - 2, 1), pym = pd.getFullYear() + '-' + pad(pd.getMonth() + 1);
+    await DB.ensureRange(`${pym}-01`, `${ym}-${pad(new Date(y, m, 0).getDate())}`);
+    const M = this.lapBulanData(ym), P = this.lapBulanData(pym), S = ST();
+    const lbl = k => { const [yy, mm] = k.split('-').map(Number); return BULAN[mm - 1] + ' ' + yy; };
+    const aktif = M.ordMasuk.filter((v, i) => v > 0 || M.terima[i] > 0).length || 1;
+    const saldo = M.diterima - M.pengeluaran, tot = a => a.reduce((s, v) => s + v, 0);
+    const bln3 = BULAN[m - 1].slice(0, 3);
+    const DK = { bg: '#f5f1e8', dark: C.dark, dark2: C.dark2, accent: C.gold, accent2: C.gold2, goldDeep: C.goldDeep, ink: C.ink, muted: C.muted, paper: '#ffffff', line: C.line, ok: C.ok, bad: C.bad };
+    const sorted = o => Object.entries(o).sort((a, b) => b[1] - a[1]);
+    const days = M.ordMasuk.map((v, i) => [`${i + 1} ${bln3}`, v]).filter(d => d[1] > 0).sort((a, b) => b[1] - a[1]).slice(0, 8);
+    const cfg = {
+      DK, toko: S.toko, alamat: S.alamat, logo: await loadLogo(), ymLabel: lbl(ym),
+      kpis: [
+        { lab: 'Pemasukan diterima', val: rp(M.diterima), sub: dPct(M.diterima, P.diterima), dark: true },
+        { lab: 'Order masuk', val: String(M.masuk.length), sub: dPct(M.masuk.length, P.masuk.length) },
+        { lab: 'Timbangan masuk', val: (Math.round(M.kgM * 10) / 10) + ' kg', sub: dPct(M.kgM, P.kgM) },
+        { lab: 'Omzet order masuk', val: rp(M.omzet), sub: dPct(M.omzet, P.omzet) },
+        { lab: 'Order diambil', val: String(M.keluar.length), sub: (Math.round(M.kgK * 10) / 10) + ' kg keluar' },
+        { lab: 'Rata-rata per hari', val: rp(M.diterima / aktif), sub: aktif + ' hari aktif' },
+        { lab: 'Pengeluaran', val: rp(M.pengeluaran), sub: M.diterima ? Math.round(M.pengeluaran / M.diterima * 100) + '% dari pemasukan' : '' },
+        { lab: 'Saldo bersih', val: rp(saldo), sub: 'diterima − pengeluaran', dark: true },
+        { lab: 'Belum dibayar', val: rp(M.belumBayar), sub: 'order bulan ini yang belum lunas' },
+      ],
+      charts: [
+        { title: 'Pemasukan diterima per hari', kind: 'bars', data: M.terima, opt: { fmt: dShort }, note: `Total ${rp(tot(M.terima))} · rata-rata ${rp(tot(M.terima) / M.n)}/hari (uang yang diterima di hari itu, termasuk pelunasan order lama)` },
+        { title: 'Order masuk per hari', kind: 'bars', data: M.ordMasuk, note: `Total ${M.masuk.length} order · rata-rata ${(M.masuk.length / M.n).toFixed(1).replace('.', ',')}/hari` },
+        { title: 'Timbangan masuk per hari (kg)', kind: 'bars', data: M.kgMasuk, opt: { c1: '#9a9488', c2: '#2b2620' }, note: `Total ${Math.round(M.kgM * 10) / 10} kg · rata-rata ${(M.kgM / M.n).toFixed(1).replace('.', ',')} kg/hari` },
+        { title: 'Order diambil per hari', kind: 'bars', data: M.ordKeluar, opt: { c1: '#7fb3d9', c2: '#2e6f9e' }, note: `Total ${M.keluar.length} order diambil pelanggan` },
+        { title: 'Pembayaran & layanan', kind: 'split', note: 'Kiri: uang diterima per metode · Kanan: omzet order masuk per jenis cuci', panels: [
+          { title: 'Metode bayar', items: [['Tunai', M.tunai], ['QRIS', M.qris], ['Transfer', M.transfer], ...(M.lainnya > 0 ? [['Lainnya', M.lainnya]] : [])], opt: { fmt: rp } },
+          { title: 'Omzet per jenis cuci', items: sorted(M.perJenis).map(([k, v]) => [JENIS_CUCI_LABEL[k] || k, v]), opt: { fmt: rp } }] },
+        { title: 'Pengeluaran per jenis', kind: 'hbars', items: sorted(M.kat), opt: { fmt: rp, c1: '#e0a77d', c2: '#b8562e' }, note: `Total pengeluaran ${rp(M.pengeluaran)}` },
+        { title: 'Kinerja kasir', kind: 'hbars', items: sorted(Object.fromEntries(Object.entries(M.perKasir).map(([k, v]) => [`${k} · ${v.n} order`, v.omzet]))), opt: { fmt: rp }, note: 'Omzet order yang diinput masing-masing kasir' },
+        { title: 'Hari tersibuk', kind: 'hbars', items: days, opt: { fmt: v => v + ' order' }, note: 'Delapan hari dengan order masuk terbanyak' },
+      ],
+    };
+    cfg.charts = cfg.charts.filter((c, i) => i === 0 || c.kind !== 'bars' || tot(c.data) > 0);
+    const slides = await buildDeckSlides(cfg), pages = [];
+    for (const c of slides) { pages.push({ jpegBytes: await this.canvasToJpegData(c), widthPt: 1280, heightPt: 720, pixelWidth: c.width, pixelHeight: c.height }); c.width = c.height = 0; }
+    const ok = await saveOrShareFile(new Blob([this.buildMultiImagePdf(pages)], { type: 'application/pdf' }), `Presentasi_NaufalLaundry_${ym}.pdf`);
+    if (ok) toast('Presentasi PDF siap');
+  },
+});
+/* ============================================================
    AREA OWNER (ikon ⚙): pengaturan, data (backup/import/reset), koneksi, riwayat perubahan
    ============================================================ */
 state.owner = ssGet('owner') === '1'; state.ownerTab = 'atur';
