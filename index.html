@@ -1603,7 +1603,7 @@ const app = {
       </div>
       <button class="btn btn-outline btn-block" style="margin-top:8px;color:#1f9d5a;border-color:#1f9d5a;" onclick="app.shareStrukWA('${trx.id}')">📱 Kirim WhatsApp</button>
       <div style="text-align:center;margin-top:6px;font-size:11px;color:#888;">
-        Struk dikirim sebagai gambar lewat menu Bagikan: pilih Thermer / app printer untuk cetak, atau WhatsApp untuk kirim.
+        Struk Eksternal/Internal = gambar lewat menu Bagikan (pilih Thermer / printer). Kirim WhatsApp = langsung ke chat nomor pelanggan.
       </div>
       <button class="btn btn-primary btn-block" style="margin-top:8px;" onclick="app.closeModal(); app.renderTab();">Selesai</button>
     `;
@@ -1992,23 +1992,36 @@ const app = {
     return canvas;
   },
 
+  _waNum(telp) { const t = String(telp || '').replace(/\D/g, ''); return t ? (t.startsWith('0') ? '62' + t.slice(1) : (t.startsWith('62') ? t : '62' + t)) : ''; },
+  _openWA(num, text) {
+    const a = document.createElement('a'); a.href = `https://wa.me/${num}?text=${encodeURIComponent(text)}`; a.target = '_blank'; a.rel = 'noopener';
+    document.body.appendChild(a); a.click(); a.remove();
+  },
+  strukTeksWA(t) {
+    const rp = fmtRupiah, L = [];
+    L.push(`*${ST().toko}*`, `Halo Kak ${t.pelanggan.nama}, berikut struk laundry Anda:`, '', `No Nota: *${t.nota}*`, `Tgl Masuk: ${fmtTgl(t.tglMasuk)}`, `Est Selesai: ${fmtTgl(t.estSelesai)}`, '');
+    t.items.forEach(it => {
+      const sub = it.harga * it.qty * (it.promoActive ? it.promoFactor : 1), q = it.satuan === 'KG' ? it.qty.toLocaleString('id-ID', { maximumFractionDigits: 2 }) : it.qty;
+      L.push(`• ${it.varianLabel} (${it.catNama})`, `  ${q} ${it.satuan} x ${rp(it.harga)}${it.promoActive ? ' (promo)' : ''} = ${rp(sub)}`);
+    });
+    if (t.ongkir > 0) L.push(`• Ongkir (Delivery Jauh) = ${rp(t.ongkir)}`);
+    const disk = (t.subtotal + (t.ongkir || 0)) - t.total; if (disk > 0) L.push(`• Diskon = -${rp(disk)}`);
+    L.push('', `*Total: ${rp(t.total)}*`, `Status: ${t.statusBayar}${t.statusBayar === 'Lunas' && t.metodeBayar ? ' (' + t.metodeBayar + ')' : ''}`);
+    if (t.parfum) L.push(`Parfum: ${t.parfum}`);
+    if (t.catatan) L.push(`Catatan: ${t.catatan}`);
+    L.push('', 'Struk ini wajib dibawa saat pengambilan.', ST().footer, `Info & pemesanan: ${ST().kontak}`);
+    return L.join('\n');
+  },
   async shareStrukWA(trxId) {
     const trx = this.findTrx(trxId); if (!trx) return;
-    const canvas = await this.drawStrukCanvas(trx);
-    const blob = await canvasBlob(canvas, 'image/png');
-    const name = `Struk_${trx.nota.replace(/[^a-zA-Z0-9]/g, '')}.png`;
-    const file = new File([blob], name, { type: 'image/png' });
-    const text = `Struk ${trx.nota} - Naufal Laundry`;
-    if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-      try { await navigator.share({ files: [file], title: text, text }); return; }
-      catch (e) { if (e.name === 'AbortError') return; }
+    let num = this._waNum(trx.pelanggan.telp);
+    if (!num) {
+      const v = await ask({ title: 'Nomor WhatsApp', body: `${trx.pelanggan.nama} belum punya nomor tersimpan.`, input: { label: 'No. WhatsApp', ph: '08xxxxxxxxxx', type: 'tel', inputmode: 'numeric', required: 'Isi nomor dulu' }, ok: 'Buka WhatsApp' });
+      if (v == null) return;
+      num = this._waNum(v); if (num.length < 9) { toast('Nomor WhatsApp tidak valid'); return; }
+      this.upsertPelanggan({ nama: trx.pelanggan.nama, alamat: '', telp: v });   // simpan supaya berikutnya langsung
     }
-    // cadangan: simpan gambar, lalu buka chat WA lewat link biasa (bukan jendela kosong)
-    const a1 = document.createElement('a'); a1.href = URL.createObjectURL(blob); a1.download = name; document.body.appendChild(a1); a1.click(); a1.remove();
-    const telp = (trx.pelanggan.telp || '').replace(/\D/g, '');
-    const num = telp ? (telp.startsWith('0') ? '62' + telp.slice(1) : telp) : '';
-    const a2 = document.createElement('a'); a2.href = 'https://wa.me/' + num; a2.target = '_blank'; a2.rel = 'noopener'; document.body.appendChild(a2); a2.click(); a2.remove();
-    toast('Gambar struk tersimpan. Lampirkan ke chat WhatsApp.', 5000);
+    this._openWA(num, this.strukTeksWA(trx));
   },
 
   // ============================================
