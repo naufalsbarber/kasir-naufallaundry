@@ -1598,16 +1598,12 @@ const app = {
       <div class="modal-header"><h3>Struk Transaksi</h3><span class="modal-close" onclick="app.closeModal(); app.renderTab();">&times;</span></div>
       ${this.strukHtml(trx)}
       <div class="row" style="margin-top:14px;">
-        <button class="btn btn-outline" onclick="app.downloadStruk('${trx.id}')">💾 Simpan Gambar</button>
-        <button class="btn btn-gold" onclick="app.shareStrukWA('${trx.id}')">📱 Kirim WA</button>
-      </div>
-      <button class="btn btn-gold btn-block" style="margin-top:8px;" onclick="app.cetakStrukPrinter('${trx.id}', false)">🖨️ Cetak ke Printer Thermal</button>
-      <div style="text-align:center;margin-top:6px;font-size:11px;color:#888;">
-        Nanti muncul menu Share — pilih app printer kamu (misal Thermer)
-      </div>
-      <div class="row" style="margin-top:8px;">
+        <button class="btn btn-gold" onclick="app.downloadStruk('${trx.id}')">🧾 Struk Eksternal</button>
         <button class="btn btn-outline" onclick="app.downloadStrukInternal('${trx.id}')">🧵 Struk Internal</button>
-        <button class="btn btn-outline" onclick="app.cetakStrukPrinter('${trx.id}', true)">🖨️ Print Internal</button>
+      </div>
+      <button class="btn btn-outline btn-block" style="margin-top:8px;color:#1f9d5a;border-color:#1f9d5a;" onclick="app.shareStrukWA('${trx.id}')">📱 Kirim WhatsApp</button>
+      <div style="text-align:center;margin-top:6px;font-size:11px;color:#888;">
+        Struk dikirim sebagai gambar lewat menu Bagikan: pilih Thermer / app printer untuk cetak, atau WhatsApp untuk kirim.
       </div>
       <button class="btn btn-primary btn-block" style="margin-top:8px;" onclick="app.closeModal(); app.renderTab();">Selesai</button>
     `;
@@ -1997,26 +1993,22 @@ const app = {
   },
 
   async shareStrukWA(trxId) {
-    const trx = this.findTrx(trxId);
-    const waTab = window.open('', '_blank');
+    const trx = this.findTrx(trxId); if (!trx) return;
     const canvas = await this.drawStrukCanvas(trx);
-    canvas.toBlob((blob) => {
-      const url = URL.createObjectURL(blob);
-      const telp = (trx.pelanggan.telp || '').replace(/\D/g, '');
-      const waNumber = telp ? (telp.startsWith('0') ? '62' + telp.slice(1) : telp) : '';
-      const waUrl = waNumber ? `https://wa.me/${waNumber}` : `https://wa.me/`;
-      if (waTab) {
-        waTab.document.write(`
-          <html><head><title>Struk ${trx.nota}</title></head>
-          <body style="margin:0;background:#111;display:flex;flex-direction:column;align-items:center;padding:20px;font-family:sans-serif;">
-            <p style="color:#fff;">Simpan gambar ini, lalu kirim manual via WhatsApp.</p>
-            <img src="${url}" style="max-width:100%;border-radius:8px;">
-            <a href="${url}" download="Struk_${trx.nota.replace(/[^a-zA-Z0-9]/g, '')}.png" style="margin-top:12px;padding:12px 20px;background:#25D366;color:#fff;text-decoration:none;border-radius:8px;">Download Gambar</a>
-            <a href="${waUrl}" target="_blank" style="margin-top:8px;padding:12px 20px;background:#128C7E;color:#fff;text-decoration:none;border-radius:8px;">Buka WhatsApp</a>
-          </body></html>
-        `);
-      }
-    }, 'image/png');
+    const blob = await canvasBlob(canvas, 'image/png');
+    const name = `Struk_${trx.nota.replace(/[^a-zA-Z0-9]/g, '')}.png`;
+    const file = new File([blob], name, { type: 'image/png' });
+    const text = `Struk ${trx.nota} - Naufal Laundry`;
+    if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: text, text }); return; }
+      catch (e) { if (e.name === 'AbortError') return; }
+    }
+    // cadangan: simpan gambar, lalu buka chat WA lewat link biasa (bukan jendela kosong)
+    const a1 = document.createElement('a'); a1.href = URL.createObjectURL(blob); a1.download = name; document.body.appendChild(a1); a1.click(); a1.remove();
+    const telp = (trx.pelanggan.telp || '').replace(/\D/g, '');
+    const num = telp ? (telp.startsWith('0') ? '62' + telp.slice(1) : telp) : '';
+    const a2 = document.createElement('a'); a2.href = 'https://wa.me/' + num; a2.target = '_blank'; a2.rel = 'noopener'; document.body.appendChild(a2); a2.click(); a2.remove();
+    toast('Gambar struk tersimpan. Lampirkan ke chat WhatsApp.', 5000);
   },
 
   // ============================================
@@ -3669,13 +3661,14 @@ Object.assign(app, {
     const kgMasuk = sum(D.masuk, kgOf), kgKeluar = sum(D.keluar, kgOf);
     const lunasLain = D.bayarHariIni.filter(t => fmtTglSingkat(t.tglMasuk) !== tglStr);
     const perJenis = {}; D.masuk.forEach(t => t.items.forEach(it => { perJenis[it.jenisCuci] = (perJenis[it.jenisCuci] || 0) + itemSub(it); }));
+    const kasir = state.currentKasir || '';
     const cv = await paintReport(1080, o => {
       const { P, W } = o;
       repHeader(o, 'LAPORAN HARIAN', `${hari}, ${tglStr}`);
       repBoxes(o, [['Total pembayaran hari ini', rp(D.totalBayarHariIni), true, 46], ['Saldo bersih', rp(net), false, 46]], 140);
       repBoxes(o, [['Tunai', rp(D.breakdownPembayaranHariIni.Tunai)], ['QRIS', rp(D.breakdownPembayaranHariIni.QRIS)], ['Transfer', rp(D.breakdownPembayaranHariIni.Transfer)]], 124);
       repSec(o, 'Rincian pemasukan');
-      repKV(o, 'Total pembayaran diterima hari ini', rp(D.totalBayarHariIni), { bold: true, c: C.goldDeep, sz: 30, sub: 'Uang yang benar-benar diterima hari ini, termasuk pelunasan order sebelumnya' });
+      repKV(o, 'Total pembayaran diterima hari ini', rp(D.totalBayarHariIni), { bold: true, c: C.goldDeep, sub: 'Uang yang benar-benar diterima hari ini, termasuk pelunasan order sebelumnya' });
       repKV(o, 'Dari order masuk hari ini (lunas hari ini)', rp(D.totalMasuk));
       repKV(o, 'Dari order diambil hari ini (lunas hari ini)', rp(D.totalKeluar));
       repKV(o, `Pelunasan order hari lain · ${lunasLain.length} nota`, rp(sum(lunasLain, t => t.total)));
@@ -3684,7 +3677,7 @@ Object.assign(app, {
       repKV(o, `Order diambil · ${D.keluar.length} nota`, `${Math.round(kgKeluar * 100) / 100} kg`);
       Object.keys(perJenis).forEach(k => repKV(o, `Omzet masuk · ${JENIS_CUCI_LABEL[k] || k}`, rp(perJenis[k])));
 
-      const tabel = (rows, ket) => {
+      const tabel = (rows) => {
         const cols = [{ h: 'NO', x: P, w: 44 }, { h: 'NOTA', x: P + 54, w: 108 }, { h: 'PELANGGAN', x: P + 172, w: 250 }, { h: 'JENIS', x: P + 432, w: 84 }, { h: 'LEVEL', x: P + 526, w: 140 }, { h: 'BIAYA', x: P + 760, a: 'right', w: 140 }, { h: 'BAYAR', x: P + 782, w: 196 }];
         repTable(o, cols, rows.map((t, i) => [String(i + 1), t.nota, t.pelanggan.nama, jenisSet(t), levelSet(t), rp(t.total).replace('Rp ', ''), (t.statusBayar === 'Lunas' ? '✓ ' : '✗ ') + this._bayarDisplayText(t)]),
           { sz: 21, bg: i => lunasOn(rows[i], tglStr) ? 'rgba(46,125,79,.12)' : (rows[i].statusBayar === 'Lunas' ? 'rgba(230,145,56,.20)' : null) });
@@ -3705,24 +3698,24 @@ Object.assign(app, {
 
       o.y += 34; repSec(o, 'Pengeluaran');
       if (D.pengeluaran.length) repTable(o, [{ h: 'JENIS', x: P, w: 330 }, { h: 'KETERANGAN', x: P + 350, w: 290 }, { h: 'BUKTI', x: P + 660, w: 150 }, { h: 'BIAYA', x: W - P, a: 'right', w: 190 }],
-        D.pengeluaran.map(e => [e.jenis, e.keterangan || '-', e.bukti || '-', rp(e.jumlah)]), { total: ['Jumlah Pengeluaran', '', '', rp(D.totalPengeluaran)] });
+        D.pengeluaran.map(p => [p.jenis, p.keterangan || '-', p.bukti || '-', rp(p.jumlah)]), { total: ['Jumlah Pengeluaran', '', '', rp(D.totalPengeluaran)] });
       else { o.txt('Tidak ada pengeluaran di tanggal ini', P, o.y, { c: C.muted }); o.y += 50; }
 
       o.y += 34; repSec(o, 'Ringkasan keuangan');
       repKV(o, 'Total pembayaran diterima', rp(D.totalBayarHariIni)); repKV(o, '− Jumlah pengeluaran', rp(D.totalPengeluaran));
       repKV(o, 'Saldo bersih', rp(net), { bold: true, c: net < 0 ? C.bad : C.ok, sz: 32 });
+
       o.y += 30; o.rect(P, o.y, W - 2 * P, 2, C.line); o.y += 50;
       o.txt('Tanda tangan operator,', W - P - 340, o.y, { c: C.muted, sz: 24 }); o.y += 10;
-      if (sigImg && !o.dry) { const sw = 340, sh = Math.min(120, Math.round(sw * sigImg.height / sigImg.width)); o.x.drawImage(sigImg, W - P - 360, o.y, sw, sh); }
-      o.y += 134; o.rect(W - P - 360, o.y - 18, 340, 2, C.ink);
-      o.txt(state.currentKasir || '.....................', W - P - 190, o.y + 14, { a: 'center', w: 800, sz: 28 }); o.y += 42;
+      if (sigImg && !o.dry) o.x.drawImage(sigImg, W - P - 360, o.y, 340, 106); o.y += 134;
+      o.rect(W - P - 360, o.y - 18, 340, 2, C.ink);
+      o.txt(kasir || '.......................', W - P - 190, o.y + 14, { a: 'center', w: 800, sz: 28 }); o.y += 60;
       repFooter(o);
       return o.y;
     });
     await this._shareReportCanvas(cv, `Laporan_Harian_NaufalLaundry_${tglStr.replace(/\//g, '-')}.pdf`);
   },
 
-  // PDF 1 halaman panjang (lebar A4) dari canvas laporan — pakai pembuat PDF bawaan (tanpa library luar)
   async _shareReportCanvas(cv, filename) {
     const widthPt = 595, heightPt = Math.round(widthPt * cv.height / cv.width);
     const pdf = await this.canvasToPdfBlob(cv, widthPt, heightPt);
